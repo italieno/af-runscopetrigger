@@ -3,27 +3,30 @@ var request = require('request');
 
 var AzureFunction = function(context, req) {
    
-    if (req.query.runscope_environment) {
+    if (req.query.bucket && req.query.environment) {
         
         //req.body.data.runs.map(testResult);
-        triggerBucketTest().then((data) => {
-            getToken().then((token) => {
-                setTimeout(function(){
-                    data.runs.map((x) => testResult(token, x));
-                }, 30000);
-            });
-        });
+        triggerBucketTest(req.query.bucket, req.query.environment)
+            .then((data) => {
+                getToken()
+                    .then((token) => {
+                        setTimeout(function(){
+                            data.runs.map((x) => testResult(token, x));
+                        }, 10000);
+                });
+        }).catch(function(e){
+            console,log('error!!!', e)        
+        });;
 
         context.res = {
             // status: 200, /* Defaults to 200 */
             body: req.query.runscope_environment
-
         };
     }
     else {
         context.res = {
             status: 400,
-            body: "Please pass a name on the query string or in the request body"
+            body: "At Least one test is failing..."
         };
     }
     context.done();
@@ -42,7 +45,7 @@ var testResult = function(token, test){
             console.log('ok');
         }
         else{
-            console.log('error');
+            throw ('test is failing');
         }
                     
         
@@ -50,9 +53,9 @@ var testResult = function(token, test){
     
 }
 
-var triggerBucketTest = function(){
+var triggerBucketTest = function(bucket, environment){
 
-    var triggerUrl = "https://api.runscope.com/radar/bucket/f2b458fd-f626-4ad3-bc55-3cc04bc5c627/trigger?runscope_environment=b2282a74-7b9f-4bbc-a2b0-f6e68851d174";
+    var triggerUrl = "https://api.runscope.com/radar/bucket/" + bucket + "/trigger?runscope_environment=" + environment;
 
     return new Promise((resolve, reject) => {
 
@@ -110,12 +113,13 @@ var getToken = function(cb){
 
 // Local development query and body params
 var debugQuery = {
-    "runscope_environment": "e17527ab-bccf-40ae-8bdd-024feb3e6cf3"
+    "bucket": "f2b458fd-f626-4ad3-bc55-3cc04bc5c627",
+    "environment": "b2282a74-7b9f-4bbc-a2b0-f6e68851d174",
 }
 
 // Local development request object
 var req = {
-    originalUrl: 'https://myfunctionurl/runscope_environment/b2282a74-7b9f-4bbc-a2b0-f6e68851d174',
+    originalUrl: 'https://myfunctionurl/bucket/f2b458fd-f626-4ad3-bc55-3cc04bc5c627/environment/b2282a74-7b9f-4bbc-a2b0-f6e68851d174',
     method: 'GET',
     query: debugQuery,
     headers: { 
@@ -141,7 +145,7 @@ var debugContext = {
     },
     done: function () {
         // When done is called, it will log the response to the console
-        console.log('Response:', this.res);
+        console.log('Starting Azure Function...');
     },
     res: null
 };
