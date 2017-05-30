@@ -1,18 +1,19 @@
 var request = require('request');
- 
 
 var AzureFunction = function(context, req) {
    
-    if (req.query.bucket && req.query.environment) {
+    if (req.query.bucket && req.query.environment && req.query.accessToken) {
         
-        //req.body.data.runs.map(testResult);
-        triggerBucketTest(req.query.bucket, req.query.environment)
+        triggerBucketWebhook(req.query.bucket, req.query.environment)
             .then((data) => {
-                getToken()
-                    .then((token) => {
-                        setTimeout(function(){
-                            data.runs.map((x) => testResult(token, x));
-                        }, 10000);
+                data.runs.map((testExecution) => {
+
+                    var token = req.query.accessToken;
+                    var testResultUrl = `https://api.runscope.com/buckets/${testExecution.bucket_key}/tests/${testExecution.test_id}/results/${testExecution.test_run_id}`;
+                    fetchTestResult(token, testResultUrl).then((result) => {
+                        console.log(result);
+                    });
+
                 });
         }).catch(function(e){
             console,log('error!!!', e)        
@@ -32,46 +33,34 @@ var AzureFunction = function(context, req) {
     context.done();
 };
 
-
-var testResult = function(token, test){
-
-    
-    var testResultUrl = "https://api.runscope.com/buckets/" + test.bucket_key + "/tests/" + test.test_id + "/results/" + test.test_run_id;
-    
-    getTestResult(token, testResultUrl).then((result) => {
-
-        var testWasSuccessfull = result == 'pass';
-        if (testWasSuccessfull){
-            console.log('ok');
-        }
-        else{
-            throw ('test is failing');
-        }
-                    
-        
-    })
-    
-}
-
-var triggerBucketTest = function(bucket, environment){
-
+var triggerBucketWebhook = function(bucket, environment){
     var triggerUrl = "https://api.runscope.com/radar/bucket/" + bucket + "/trigger?runscope_environment=" + environment;
-
     return new Promise((resolve, reject) => {
-
             var result = request({
                     url: triggerUrl
                 }, 
                 function(err, res) {
                     var json = JSON.parse(res.body);
+                    console.log("Environemnt --> " + json.data.runs[0].environment_name);
                     resolve(json.data);
                 });
         });
-
 }
 
-var getTestResult = function(token, url){
-    
+var fetchTestResult = function(token, testResultUrl) {
+    return new Promise(function (resolve, reject) {
+        (function getTestResultRecursive(){
+            getTestResult(token, testResultUrl)
+                .then(function(result) { 
+                    console.log("...");
+                    if (result != 'working' && result !== 'queued' && result !== undefined) return resolve(result);
+                    setTimeout(getTestResultRecursive, 1000);
+                });
+        })();
+    });
+}
+
+var getTestResult = function(token, url){   
     return new Promise((resolve, reject) => {
 
             var result = request({
@@ -82,46 +71,21 @@ var getTestResult = function(token, url){
                 }, 
                 function(err, res) {
                     var json = JSON.parse(res.body);
+                    //console.log(json.data.test_run_id);
                     resolve(json.data.result);
                 });
         });
-}
-
-var getToken = function(cb){
-    
-        return new Promise((resolve, reject) => {
-
-            var result = request({
-                    url: 'https://www.runscope.com/signin/oauth/access_token',
-                    method: 'POST',
-                    form: {
-                        'grant_type': 'authorization_code',
-                        'client_id': '4de250fe-6157-4361-97eb-13998efba45f',
-                        'client_secret': 'e8c896f6-15ad-4e13-a469-f5b68931be03',
-                        'code': 'd43419d3-80f7-4257-8f54-82425e9fb7f9'
-                    }
-                }, 
-                function(err, res) {
-                    
-                        var json = JSON.parse(res.body);
-                        resolve(json.access_token);
-                    
-                });
-        });
-}
-
-
-// Local development query and body params
-var debugQuery = {
-    "bucket": "f2b458fd-f626-4ad3-bc55-3cc04bc5c627",
-    "environment": "b2282a74-7b9f-4bbc-a2b0-f6e68851d174",
 }
 
 // Local development request object
 var req = {
     originalUrl: 'https://myfunctionurl/bucket/f2b458fd-f626-4ad3-bc55-3cc04bc5c627/environment/b2282a74-7b9f-4bbc-a2b0-f6e68851d174',
     method: 'GET',
-    query: debugQuery,
+    query: {
+        "bucket": "f2b458fd-f626-4ad3-bc55-3cc04bc5c627",
+        "environment": "b2282a74-7b9f-4bbc-a2b0-f6e68851d174",
+        "accessToken" : "fa96481a-3c20-49ec-ae4f-fec9906e309a"
+    },
     headers: { 
         connection: 'Keep-Alive',
         accept: 'application/json',
