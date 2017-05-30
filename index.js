@@ -1,45 +1,62 @@
 var request = require('request');
 
 var AzureFunction = function(context, req) {
-   
+
     if (req.query.bucket && req.query.environment && req.query.accessToken) {
         
-        triggerBucketWebhook(req.query.bucket, req.query.environment)
-            .then((data) => {
-                data.runs.map((testExecution) => {
-
-                    var token = req.query.accessToken;
-                    var testResultUrl = `https://api.runscope.com/buckets/${testExecution.bucket_key}/tests/${testExecution.test_id}/results/${testExecution.test_run_id}`;
-                    fetchTestResult(token, testResultUrl).then((result) => {
-                        console.log(result);
-                    });
-
-                });
-        }).catch(function(e){
-            console,log('error!!!', e)        
-        });;
+        start(req.query.bucket, req.query.environment, req.query.accessToken)
+            .then(() => {
+                console.log('ALL GOOD!');
+            })
+            .catch((err) => {
+                console.log('SOMETHING WENT WRONG: ' + err);
+            });
 
         context.res = {
-            // status: 200, /* Defaults to 200 */
+            status: 200,
             body: req.query.runscope_environment
         };
     }
     else {
         context.res = {
             status: 400,
-            body: "At Least one test is failing..."
+            body: "missing required parameters (bucket, environment and accessToken)"
         };
     }
     context.done();
 };
 
+var start = function(bucket, environment, accessToken){
+
+    return new Promise((resolve, reject) => {
+        triggerBucketWebhook(bucket, environment)
+                .then((data) => {
+                    data.runs.map((testExecution) => {
+
+                        var token = accessToken;
+                        var testResultUrl = `https://api.runscope.com/buckets/${testExecution.bucket_key}/tests/${testExecution.test_id}/results/${testExecution.test_run_id}`;
+                        fetchTestResult(token, testResultUrl)
+                            .then((result) => {
+                                console.log(result);
+                            })
+                            .catch((err) => {
+                                reject(err);
+                            });
+                    });
+            }).catch((err) => {
+                reject(err);      
+            });
+        });
+}
+
 var triggerBucketWebhook = function(bucket, environment){
-    var triggerUrl = "https://api.runscope.com/radar/bucket/" + bucket + "/trigger?runscope_environment=" + environment;
+    var triggerUrl = `https://api.runscope.com/radar/bucket/${bucket}/trigger?runscope_environment=${environment}`;
     return new Promise((resolve, reject) => {
             var result = request({
                     url: triggerUrl
                 }, 
                 function(err, res) {
+                    if (err != null) reject(err);
                     var json = JSON.parse(res.body);
                     console.log("Environemnt --> " + json.data.runs[0].environment_name);
                     resolve(json.data);
@@ -49,35 +66,32 @@ var triggerBucketWebhook = function(bucket, environment){
 
 var fetchTestResult = function(token, testResultUrl) {
     return new Promise(function (resolve, reject) {
-        (function getTestResultRecursive(){
-            getTestResult(token, testResultUrl)
+        (function getExecutionResultRecursive(){
+            getExecutionResult(token, testResultUrl)
                 .then(function(result) { 
                     console.log("...");
+                    if (result == 'fail') return reject('at least one test is failing');
                     if (result != 'working' && result !== 'queued' && result !== undefined) return resolve(result);
-                    setTimeout(getTestResultRecursive, 1000);
+                    setTimeout(getExecutionResultRecursive, 1000);
                 });
         })();
     });
 }
 
-var getTestResult = function(token, url){   
+var getExecutionResult = function(token, url){   
     return new Promise((resolve, reject) => {
-
-            var result = request({
-                    url: url,
-                    auth: {
-                        'bearer': token
-                    }
-                }, 
-                function(err, res) {
-                    var json = JSON.parse(res.body);
-                    //console.log(json.data.test_run_id);
-                    resolve(json.data.result);
-                });
+        var result = request({
+                url: url,
+                auth: { 'bearer': token }
+            }, 
+            function(err, res) {
+                if (err != null) reject(err);
+                var json = JSON.parse(res.body);
+                resolve(json.data.result);
+            });
         });
 }
 
-// Local development request object
 var req = {
     originalUrl: 'https://myfunctionurl/bucket/f2b458fd-f626-4ad3-bc55-3cc04bc5c627/environment/b2282a74-7b9f-4bbc-a2b0-f6e68851d174',
     method: 'GET',
@@ -96,7 +110,6 @@ var req = {
     rawBody: null
 };
 
-// Local development context
 var debugContext = {
     invocationId: 'ID',
     bindings: {
@@ -108,11 +121,9 @@ var debugContext = {
         console.log(val);
     },
     done: function () {
-        // When done is called, it will log the response to the console
         console.log('Starting Azure Function...');
     },
     res: null
 };
 
-// Call the AzureFunction locally with your testing params
 AzureFunction(debugContext, req);
